@@ -9,7 +9,10 @@ primary_region = "sjc"
   PORT_AGENT = "8000"
   RUNS_DIR = "/app/runs"
 
+# performance, not shared: a shared vCPU is guaranteed only 6.25% of a core once its burst
+# balance runs out, and a sustained load (the full bench: 40 asks + a 60-page PDF ingest)
+# drains it. Throttled, TTFT p50 went from ~1 s to 6.7 s.
 [[vm]]
-  memory = "1gb"
-  cpu_kind = "shared"
+  memory = "2gb"
+  cpu_kind = "performance"
   cpus = 1

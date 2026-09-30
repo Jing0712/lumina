@@ -17,7 +17,7 @@ const questions = [
   'How does TLS 1.3 reduce handshake latency?'
 ].map((q) => `${q} (${stamp})`);
 
-const client = makeClient({ target: 'http://localhost:8787', userId: 'loadtest' });
+const client = makeClient({ target: process.env.TARGET ?? 'http://localhost:8787', userId: 'loadtest' });
 const { threadId } = await client.post('/threads', {});
 const t0 = Date.now();
 const results = await pool(
