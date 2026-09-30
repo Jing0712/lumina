@@ -2,7 +2,7 @@
   "name": "lumina",
   "private": true,
   "version": "0.1.0",
-  "description": "LUMINA \u2014 Perplexity-style AI search. FDE Agent Engineering Bootcamp, Assignment 1.",
+  "description": "LUMINA — Perplexity-style AI search. FDE Agent Engineering Bootcamp, Assignment 1.",
   "type": "module",
   "engines": {
     "node": ">=20.19"
@@ -20,7 +20,7 @@
     "dev:web": "npm run dev -w @lumina/web",
     "worker": "npm run worker -w @lumina/agent",
     "build": "npm run build -w @lumina/contract && npm run build -w @lumina/agent && npm run build -w @lumina/gateway && npm run build -w @lumina/web",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "tsc -p packages/contract/tsconfig.json --noEmit && tsc -p backend/gateway/tsconfig.json --noEmit && tsc -p backend/agent/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "lint": "eslint .",
     "indexes": "node scripts/create-indexes.mjs",
     "export:runs": "node scripts/export-runs.mjs",
