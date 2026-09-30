@@ -16,7 +16,7 @@ import { fetchPage } from '../providers/fetchPage.js';
 import { searchWeb, type SearchResult } from '../providers/search.js';
 import { ProviderError } from '../providers/llm.js';
 import { hybridSearch } from '../rag/retrieve.js';
-import { clip, collapse, normalize, pickSnippet } from '../util/text.js';
+import { clip, collapse, latinShare, normalize, pickSnippet } from '../util/text.js';
 import { docKey, type RunCtx, type Src } from './context.js';
 
 // ---------------------------------------------------------------- web
@@ -69,10 +69,14 @@ export async function researchWeb(
 
   // Pick the pages to read: skip ones another sub-question already claimed, so deep reads wider.
   const picks: SearchResult[] = [];
+  const latinQ = latinShare(query) >= 0.9;
   for (const r of outcome.results) {
     if (picks.length >= opts.pages) break;
     if (opts.claimed?.has(r.url)) continue;
     if (/\.(pdf|zip|mp4|mp3|png|jpe?g)(\?|$)/i.test(r.url)) continue;
+    // An English question is not answered from a page in another script: the reader cannot
+    // use it, and its snippets cannot be verified (normalize() keeps only a–z0–9).
+    if (latinQ && latinShare(`${r.title} ${r.rawContent ?? r.content}`.slice(0, 4000)) < 0.6) continue;
     opts.claimed?.add(r.url);
     picks.push(r);
   }

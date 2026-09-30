@@ -60,6 +60,19 @@ export interface PickedSnippet {
 }
 
 /**
+ * Share of letters that are Latin a–z. normalize() (like the grader's) keeps only a–z0–9, so a
+ * snippet in another script collapses to a few stray Latin words and can never be checked
+ * against the page. For a Latin-script question, such snippets and pages are not citable.
+ */
+export function latinShare(s: string): number {
+  const letters = String(s ?? '').match(/\p{L}/gu) ?? [];
+  if (!letters.length) return 1;
+  let latin = 0;
+  for (const ch of letters) if (/[a-z]/i.test(ch)) latin++;
+  return latin / letters.length;
+}
+
+/**
  * Choose the passage a citation rests on: the window of consecutive sentences that best
  * matches the question, preferring one that is verifiably present in the raw page.
  */
@@ -70,6 +83,8 @@ export function pickSnippet(
   maxChars = 360
 ): PickedSnippet {
   const sents = sentences(text).filter((s) => s.split(' ').length >= 4 && s.length < 600);
+  // A Latin-script question gets Latin-script snippets only (see latinShare).
+  const latinQuery = latinShare(query) >= 0.9;
   const kws = keywords(query);
   const candidates: { s: string; score: number; ord: number }[] = [];
 
@@ -80,6 +95,7 @@ export function pickSnippet(
       const words = win.split(' ').length;
       if (words < 14 && j < Math.min(sents.length, i + 3) - 1) continue;
       if (win.length > maxChars) break;
+      if (latinQuery && latinShare(win) < 0.97) continue;
       const low = normalize(win);
       let score = 0;
       for (const k of kws) if (low.includes(k)) score += 2;
