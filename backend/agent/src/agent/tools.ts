@@ -52,6 +52,7 @@ export async function researchWeb(
     throw err;
   }
   ctx.addSearch(outcome.cached);
+  ctx.mark('searchDone');
   ctx.trace(
     'web_search',
     { query, provider: env.searchProvider, cached: outcome.cached },
@@ -114,9 +115,10 @@ export async function researchWeb(
 
 async function readPage(ctx: RunCtx, src: Src, r: SearchResult, query: string, subQuestion: number | undefined, order: number): Promise<void> {
   const t0 = Date.now();
-  const page = await fetchPage(r.url, ctx.signal);
   const hadExtract = Boolean(src.text);
-  if (page.ok) {
+  // With the provider's extract in hand, fetch the raw page only to verify against (no jsdom).
+  const page = await fetchPage(r.url, ctx.signal, { readText: !hadExtract });
+  if (page.ok && page.text) {
     src.text = page.text;
     if (page.title && page.title.length > 3) src.title = page.title.slice(0, 300);
   }
@@ -126,7 +128,7 @@ async function readPage(ctx: RunCtx, src: Src, r: SearchResult, query: string, s
     src.verified = picked.verified;
   }
   const reason = page.ok
-    ? `read ${page.text.length.toLocaleString('en-US')} chars${src.verified === true ? '; citation snippet verified in the raw page' : src.verified === false ? '; no passage verifiable in the raw page, so it will not be cited' : ''}`
+    ? `${hadExtract ? `fetched the raw page (${src.text.length.toLocaleString('en-US')} chars of text via the search provider's extract)` : `read ${page.text.length.toLocaleString('en-US')} chars`}${src.verified === true ? '; citation snippet verified in the raw page' : src.verified === false ? '; no passage verifiable in the raw page, so it will not be cited' : ''}`
     : hadExtract
       ? `publisher fetch failed; reading the search provider's extract of the page instead (snippet unverifiable)`
       : 'could not read the page; skipped';

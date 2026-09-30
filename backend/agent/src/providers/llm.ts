@@ -5,6 +5,7 @@
  * ProviderError. Nothing in here catches and returns something plausible.
  */
 import { env, secrets } from '../env.js';
+import { nodeFetch } from '../util/httpFetch.js';
 
 export class ProviderError extends Error {
   constructor(
@@ -72,24 +73,32 @@ function body(req: LlmRequest, stream: boolean): string {
   });
 }
 
-function combineSignals(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(env.llmTimeoutMs);
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
+/**
+ * LLM_TIMEOUT_MS bounds how long the provider may take to START answering. Once a stream is
+ * flowing, a long answer is not a failure: the run's own wall-clock cap (per gear) bounds it.
+ * (A whole-stream timeout here turned every long deep synthesis into a 502.)
+ */
 async function post(req: LlmRequest, stream: boolean): Promise<Response> {
+  const startGuard = new AbortController();
+  const timer = setTimeout(() => startGuard.abort(new Error(`no response within ${env.llmTimeoutMs}ms`)), env.llmTimeoutMs);
+  const signal = req.signal ? AbortSignal.any([req.signal, startGuard.signal]) : startGuard.signal;
   let res: Response;
   try {
-    res = await fetch(`${env.anthropicBaseUrl}/v1/messages`, {
+    res = await nodeFetch(`${env.anthropicBaseUrl}/v1/messages`, {
       method: 'POST',
       headers: headers(),
       body: body(req, stream),
-      signal: combineSignals(req.signal)
+      signal
     });
   } catch (err) {
+    clearTimeout(timer);
     if (req.signal?.aborted) throw err;
     throw new ProviderError('anthropic', `request failed: ${(err as Error).message}`);
   }
+  // Streaming: headers arrived, so the provider has started; stop the start guard. A
+  // non-streamed call keeps it until the body is read.
+  if (stream) clearTimeout(timer);
+  else void res.clone().arrayBuffer().finally(() => clearTimeout(timer)).catch(() => undefined);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     let msg = text.slice(0, 300);
@@ -127,6 +136,8 @@ export interface StreamHandlers {
   onText?: (delta: string) => void;
   /** A tool_use block started: the turn is going to call a tool. */
   onToolStart?: (name: string) => void;
+  /** Response headers arrived: the provider has started answering. */
+  onHeaders?: () => void;
 }
 
 /**
@@ -135,6 +146,7 @@ export interface StreamHandlers {
  */
 export async function stream(req: LlmRequest, h: StreamHandlers = {}): Promise<LlmTurn> {
   const res = await post(req, true);
+  h.onHeaders?.();
   if (!res.body) throw new ProviderError('anthropic', 'empty stream body');
 
   const blocks: (ContentBlock & { _json?: string })[] = [];

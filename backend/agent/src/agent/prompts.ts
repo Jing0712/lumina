@@ -49,7 +49,7 @@ Decompose the user's question into ${min}–${max} sub-questions that a careful 
 - be answerable by a web search on its own (self-contained: repeat names and context, no pronouns pointing at the original question);
 - cover a DIFFERENT facet (cost, mechanism, failure modes, alternatives, evidence, recent changes...), so together they retrieve different pages;
 - not be a restatement of the original question.
-Give each a one-line reason: why answering it is necessary for the final answer.
+Give each a reason of at most 12 words: why answering it is necessary for the final answer. Keep each sub-question under 20 words.
 Call the plan_research tool with the plan.`;
 }
 

@@ -77,6 +77,7 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
   ];
   const tools = QUICK_TOOLS(Boolean(spaceId));
 
+  ctx.mark('llmStart');
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const lastTurn = turn === MAX_TURNS - 1;
     const turnResult = await llm.stream(
@@ -89,7 +90,7 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
         toolChoice: ctx.capHit || lastTurn || ctx.remainingToolCalls() === 0 ? { type: 'none' } : { type: 'auto' },
         signal: ctx.signal
       },
-      { onText: (d) => { ctx.mark('llmFirstText'); writer.onText(d); } }
+      { onHeaders: () => ctx.mark('llmHeaders'), onText: (d) => { ctx.mark('llmFirstText'); writer.onText(d); } }
     );
     ctx.addLlmUsage(env.llmModel, turnResult.tokensIn, turnResult.tokensOut);
     const uses = turnResult.content.filter((b): b is Extract<llm.ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use');

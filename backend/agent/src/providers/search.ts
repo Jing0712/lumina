@@ -12,6 +12,7 @@ import { log } from '../log.js';
 import { Lru } from '../util/lru.js';
 import { isTimeSensitive } from '../util/text.js';
 import { ProviderError } from './llm.js';
+import { nodeFetch } from '../util/httpFetch.js';
 
 export interface SearchResult {
   title: string;
@@ -102,7 +103,7 @@ async function tavily(query: string, signal?: AbortSignal): Promise<SearchResult
   if (!secrets.tavily) throw new ProviderError('tavily', 'TAVILY_API_KEY is not set');
   let res: Response;
   try {
-    res = await fetch('https://api.tavily.com/search', {
+    res = await nodeFetch('https://api.tavily.com/search', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${secrets.tavily}` },
       body: JSON.stringify({

@@ -111,7 +111,7 @@ async function researchSub(ctx: RunCtx, sq: SubQuestion, pages: number, claimed:
 /** plan_research: decompose the question. Deep only — it is never offered to a quick run. */
 async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Plan> {
   const min = env.deepSubQuestionsMin;
-  const max = env.deepSubQuestionsMax;
+  const max = Math.max(min, Math.min(env.deepSubQuestionsMax, env.deepSubQuestionsTarget));
   if (!ctx.reserve()) throw new Error('no tool budget left to plan');
   const t0 = Date.now();
 
@@ -122,7 +122,7 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
       messages: [...history.slice(-2), { role: 'user', content: extra ? `${ctx.init.query}\n\n${extra}` : ctx.init.query }],
       tools: [PLAN_TOOL(min, max)],
       toolChoice: { type: 'tool', name: 'plan_research' },
-      maxTokens: 900,
+      maxTokens: 500,
       temperature: 0.3,
       signal: ctx.signal
     });

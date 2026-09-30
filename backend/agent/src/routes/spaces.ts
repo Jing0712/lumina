@@ -7,6 +7,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { asyncRouter } from '../util/asyncRouter.js';
 import multer from 'multer';
 import { Readable } from 'node:stream';
+import { ObjectId } from 'mongodb';
 import { ACCEPTED_UPLOAD_TYPES, CreateSpaceBody, MAX_UPLOAD_BYTES, newId } from '@lumina/contract';
 import { col, uploadsBucket } from '../db.js';
 import { wakeWorker } from '../jobs/worker.js';
@@ -90,34 +91,42 @@ spacesRouter.post('/spaces/:spaceId/documents', async (req, res, next) => {
   }
 
   const docId = newId('doc');
-  const bucket = await uploadsBucket();
-  const fileId = await new Promise<string>((resolve, reject) => {
-    const up = bucket.openUploadStream(file.originalname, { metadata: { docId, spaceId: space._id, userId, mimeType } });
-    Readable.from(file.buffer).pipe(up).on('error', reject).on('finish', () => resolve(String(up.id)));
-  });
-
   const now = new Date();
-  await (await col<{ _id: string; [k: string]: unknown }>('documents')).insertOne({
-    _id: docId,
-    spaceId: space._id,
-    userId,
-    title: file.originalname.slice(0, 200),
-    mimeType,
-    bytes: file.size,
-    status: 'pending',
-    pct: 0,
-    fileId,
-    createdAt: now
-  });
-  await (await col<{ _id: string; [k: string]: unknown }>('jobs')).insertOne({
-    _id: newId('doc').replace('doc_', 'job_'),
-    kind: 'index_document',
-    status: 'pending',
-    payload: { docId },
-    userId,
-    attempts: 0,
-    createdAt: now
-  });
+  // The bytes and the document row are written together; the job row goes last, so the worker
+  // can never claim a job whose file is not fully stored yet.
+  const fileObjectId = new ObjectId();
+  const bucket = await uploadsBucket();
+  const [documents, jobs] = await Promise.all([
+    col<{ _id: string; [k: string]: unknown }>('documents'),
+    col<{ _id: string; [k: string]: unknown }>('jobs')
+  ]);
+  await Promise.all([
+    new Promise<void>((resolve, reject) => {
+      const up = bucket.openUploadStreamWithId(fileObjectId, file.originalname, { metadata: { docId, spaceId: space._id, userId, mimeType } });
+      Readable.from(file.buffer).pipe(up).on('error', reject).on('finish', () => resolve());
+    }),
+    documents.insertOne({
+      _id: docId,
+      spaceId: space._id,
+      userId,
+      title: file.originalname.slice(0, 200),
+      mimeType,
+      bytes: file.size,
+      status: 'pending',
+      pct: 0,
+      fileId: String(fileObjectId),
+      createdAt: now
+    })
+  ]);
+  await jobs.insertOne({
+      _id: newId('doc').replace('doc_', 'job_'),
+      kind: 'index_document',
+      status: 'pending',
+      payload: { docId },
+      userId,
+      attempts: 0,
+      createdAt: now
+    });
   wakeWorker();
   res.status(202).json({ docId, status: 'pending' });
 });

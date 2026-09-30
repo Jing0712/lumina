@@ -18,6 +18,7 @@ import { memoryRouter } from './routes/memory.js';
 import { spacesRouter } from './routes/spaces.js';
 import { statsRouter } from './routes/stats.js';
 import { startWorker } from './jobs/worker.js';
+import { startNetTrace } from './util/netTrace.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -27,6 +28,7 @@ app.use((req, res, next) =>
 );
 
 mkdirSync(env.runsDir, { recursive: true });
+if (process.env.NET_TRACE === '1') startNetTrace(env.runsDir);
 
 // ---- request id: reuse the gateway's, so one id greps across both logs
 app.use((req, res, next) => {

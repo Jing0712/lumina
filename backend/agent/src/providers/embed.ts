@@ -1,6 +1,7 @@
 import { EMBEDDING_DIMS } from '@lumina/contract';
 import { env, secrets } from '../env.js';
 import { ProviderError } from './llm.js';
+import { nodeFetch } from '../util/httpFetch.js';
 
 export interface Embedded {
   vectors: number[][];
@@ -20,7 +21,7 @@ export async function embed(inputs: string[], signal?: AbortSignal): Promise<Emb
     const batch = inputs.slice(i, i + BATCH).map((s) => s.slice(0, 24000) || ' ');
     let res: Response;
     try {
-      res = await fetch(`${env.openaiBaseUrl}/v1/embeddings`, {
+      res = await nodeFetch(`${env.openaiBaseUrl}/v1/embeddings`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${secrets.openai}` },
         body: JSON.stringify({ model: env.embeddingModel, input: batch }),

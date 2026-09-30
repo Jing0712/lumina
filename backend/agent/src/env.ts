@@ -72,6 +72,8 @@ export const env = {
   // Deep search is the expensive gear, so its limits are configuration, not code.
   deepSubQuestionsMin: num(process.env.DEEP_SUB_QUESTIONS_MIN, 3),
   deepSubQuestionsMax: num(process.env.DEEP_SUB_QUESTIONS_MAX, 6),
+  /** How many the planner is asked for. Fewer, sharper sub-questions plan faster (deep_plan_p95_ms). */
+  deepSubQuestionsTarget: num(process.env.DEEP_SUB_QUESTIONS_TARGET, 4),
   deepDailyCap: num(process.env.DEEP_DAILY_CAP, 5),
   deepConcurrency: num(process.env.DEEP_CONCURRENCY, 4),
 

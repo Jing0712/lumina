@@ -97,8 +97,12 @@ export function pickSnippet(
   candidates.sort((a, b) => b.score - a.score || a.ord - b.ord);
   if (rawNormalized === null) return { snippet: candidates[0]!.s, verified: null };
 
-  for (const c of candidates.slice(0, 60)) {
-    if (snippetIsGrounded(c.s, rawNormalized)) return { snippet: c.s, verified: true };
+  // One whole-snippet scan per candidate (a whole match implies the grader's 12-token window
+  // match). Scanning every window of every candidate against a multi-MB page is quadratic and
+  // blocks the event loop for seconds under load.
+  for (const c of candidates.slice(0, 12)) {
+    const n = normalize(c.s);
+    if (n && rawNormalized.includes(n)) return { snippet: c.s, verified: true };
   }
   return { snippet: candidates[0]!.s, verified: false };
 }

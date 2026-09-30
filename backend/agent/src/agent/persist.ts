@@ -9,6 +9,7 @@ import { env } from '../env.js';
 import { col } from '../db.js';
 import { log } from '../log.js';
 import type { RunCtx } from './context.js';
+import { maxLoopLagSince } from '../util/loopLag.js';
 
 export function runLogOf(ctx: RunCtx, terminated: Terminated): RunLog {
   const toolCalls = [...ctx.toolCalls]
@@ -33,6 +34,7 @@ export async function persistRun(
 ): Promise<void> {
   const { requestId, userId, threadId, answerId, query, depth } = ctx.init;
   const runLog = runLogOf(ctx, terminated);
+  ctx.marks.maxLoopLagMs = maxLoopLagSince(ctx.started);
   const now = new Date();
 
   // A request the browser abandoned is not an answer: it gets a request row and a log line,
@@ -43,7 +45,7 @@ export async function persistRun(
   if (!abandoned) {
     try {
       mkdirSync(env.runsDir, { recursive: true });
-      writeFileSync(join(env.runsDir, `${safe(requestId)}.json`), JSON.stringify(runLog, null, 2));
+      writeFileSync(join(env.runsDir, `${safe(requestId)}.json`), JSON.stringify({ ...runLog, marks: ctx.marks }, null, 2));
     } catch (err) {
       log.error({ requestId, err: (err as Error).message }, 'could not write run log file');
     }

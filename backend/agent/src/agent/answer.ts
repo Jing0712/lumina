@@ -104,7 +104,10 @@ export class AnswerWriter {
   }
 
   private emit(t: string): void {
-    if (this.ctx.ttftMs === null) this.ctx.ttftMs = this.ctx.elapsedMs();
+    if (this.ctx.ttftMs === null) {
+      this.ctx.ttftMs = this.ctx.elapsedMs();
+      this.ctx.mark('firstToken');
+    }
     this.ctx.init.stream.send('token', { text: t });
     this.text += t;
     this.ctx.answerText += t;
