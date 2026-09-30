@@ -14,6 +14,7 @@ import { readFile } from 'node:fs/promises';
 import type { ZodTypeAny } from 'zod';
 import { AskBody, CreateSpaceBody, CreateThreadBody, HealthResponse, REQUEST_HEADER, USER_HEADER } from '@lumina/contract';
 import { env } from './env.js';
+import { agentFetch } from './agentFetch.js';
 import { log } from './log.js';
 import { rateLimit } from './rateLimit.js';
 import { proxyAsk, proxyJson, proxyUpload } from './proxy.js';
@@ -69,7 +70,7 @@ const handle =
 app.get('/health', async (_req, res) => {
   let ai: { status: 'ok' | 'down' } & Record<string, unknown> = { status: 'down' };
   try {
-    const upstream = await fetch(`${env.agentUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    const upstream = await agentFetch(`${env.agentUrl}/health`, { method: 'GET', headers: {}, signal: AbortSignal.timeout(3000) });
     const body = (await upstream.json()) as Record<string, unknown>;
     ai = { ...body, status: upstream.ok ? 'ok' : 'down' };
   } catch (err) {

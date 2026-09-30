@@ -10,6 +10,7 @@ import { MAX_UPLOAD_BYTES, REQUEST_HEADER, USER_HEADER } from '@lumina/contract'
 import { env } from './env.js';
 import { log } from './log.js';
 import { sseHeaders, sseSend } from './sse.js';
+import { agentFetch, type AgentFetchInit } from './agentFetch.js';
 
 function upstreamHeaders(req: Request, res: Response, extra: Record<string, string> = {}): Record<string, string> {
   return {
@@ -49,21 +50,22 @@ async function relay(upstream: globalThis.Response, res: Response): Promise<void
  */
 const RETRYABLE = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
 function causeCode(err: unknown): string {
-  const c = (err as { cause?: { code?: string } })?.cause;
-  return c?.code ?? '';
+  const e = err as { code?: string; cause?: { code?: string } };
+  return e?.code ?? e?.cause?.code ?? '';
 }
-async function fetchAgent(url: string, init: RequestInit): Promise<globalThis.Response> {
+async function fetchAgent(url: string, init: AgentFetchInit): Promise<globalThis.Response> {
   try {
-    return await fetch(url, init);
+    return await agentFetch(url, init);
   } catch (err) {
     const code = causeCode(err);
-    if (!RETRYABLE.has(code) || init.signal?.aborted || init.body instanceof Object && 'pipe' in (init.body as object)) {
+    // A streamed body (the upload) cannot be replayed, so only string/empty bodies retry.
+    if (!RETRYABLE.has(code) || init.signal?.aborted || (init.body !== undefined && typeof init.body !== 'string')) {
       throw withCode(err, code);
     }
     log.warn({ url, code }, 'agent connection failed before a response; retrying once');
     await new Promise((r) => setTimeout(r, 250));
     try {
-      return await fetch(url, init);
+      return await agentFetch(url, init);
     } catch (err2) {
       throw withCode(err2, causeCode(err2));
     }
@@ -101,16 +103,15 @@ export async function proxyUpload(req: Request, res: Response): Promise<void> {
   }
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(`${env.agentUrl}${req.originalUrl}`, {
+    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: 'POST',
       headers: upstreamHeaders(req, res, {
         'content-type': req.header('content-type') ?? 'application/octet-stream',
         ...(length ? { 'content-length': String(length) } : {})
       }),
-      body: req as unknown as NonNullable<RequestInit['body']>,
-      duplex: 'half',
+      body: req,
       signal: AbortSignal.timeout(Math.max(env.upstreamTimeoutMs, 120000))
-    } as RequestInit & { duplex: 'half' });
+    });
   } catch (err) {
     return badGateway(res, withCode(err, causeCode(err)), 'agent service unreachable');
   }
