@@ -6,7 +6,7 @@ primary_region = "iad"
   PORT_GATEWAY = "8787"
   AGENT_URL = "http://lumina-agent-jc0930.internal:8000"
   # Add your Vercel URL here before you deploy the UI.
-  CORS_ORIGINS = "https://lumina-jc0930.vercel.app"
+  CORS_ORIGINS = "https://lumina-psi-five-87.vercel.app,https://lumina-jc0930.vercel.app"
   RATE_LIMIT_PER_MINUTE = "120"
 
 [http_service]

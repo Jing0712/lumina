@@ -60,8 +60,10 @@ export async function runDeep(ctx: RunCtx, history: llm.LlmMessage[]): Promise<{
   await writer.commit(); // sources go out as soon as the research is merged
 
   const planText = plan.subQuestions.map((s) => `${s.i}. ${s.question}${s.reason ? ` — ${s.reason}` : ''}`).join('\n');
+  // Only the last exchange: enough to resolve a follow-up, not enough to tempt the model into
+  // re-answering an earlier question (it did, before this cut).
   const messages: llm.LlmMessage[] = [
-    ...history,
+    ...history.slice(-2),
     {
       role: 'user',
       content: `QUESTION: ${query}\n\nRESEARCH PLAN:\n${planText}\n\n${formatSources(ctx.sources, env.pageCharsDeep, true)}\n\nWrite the structured answer now.`

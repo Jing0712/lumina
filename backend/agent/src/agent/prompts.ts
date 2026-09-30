@@ -19,6 +19,7 @@ You answer from numbered SOURCES that were retrieved for this question. Rules:
 - Be concise: lead with the direct answer in one or two sentences, then add only the detail that matters.
 - PLAIN TEXT ONLY: the interface does not render Markdown. Never use **, __, #, backticks or tables. Separate paragraphs with a blank line; for a list, start each line with "• ".
 - Write the answer in the user's language.
+- Earlier turns in this conversation are context only (e.g. to resolve "it" or "that"). Answer ONLY the latest QUESTION; never re-answer or summarise an earlier question.
 
 Tools:
 - If the sources are clearly insufficient, you may call web_search${hasSpace ? ' or search_documents' : ''} ONCE with a better query, or fetch_page on a promising URL, before you write anything.
@@ -39,7 +40,8 @@ A research plan split the user's question into sub-questions, and each was resea
   Separate sections with a blank line; for a list, start each line with "• ".
 - Be dense, not padded. No filler, no restating the question.
 - If a sub-question found nothing useful, say so in its section instead of guessing.
-- Write in the user's language.${memoryBlock(memories)}`;
+- Write in the user's language.
+- Earlier turns in this conversation are context only (e.g. to resolve "it" or "that"). Answer ONLY the latest QUESTION; never re-answer or summarise an earlier question.${memoryBlock(memories)}`;
 }
 
 export function plannerSystem(min: number, max: number): string {
