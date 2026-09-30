@@ -90,7 +90,7 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
         toolChoice: ctx.capHit || lastTurn || ctx.remainingToolCalls() === 0 ? { type: 'none' } : { type: 'auto' },
         signal: ctx.signal
       },
-      { onHeaders: () => ctx.mark('llmHeaders'), onText: (d) => { ctx.mark('llmFirstText'); writer.onText(d); } }
+      { onHedge: () => ctx.mark('llmHedged'), onHeaders: () => ctx.mark('llmHeaders'), onText: (d) => { ctx.mark('llmFirstText'); writer.onText(d); } }
     );
     ctx.addLlmUsage(env.llmModel, turnResult.tokensIn, turnResult.tokensOut);
     const uses = turnResult.content.filter((b): b is Extract<llm.ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use');

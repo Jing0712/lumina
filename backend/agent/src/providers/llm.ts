@@ -78,7 +78,7 @@ function body(req: LlmRequest, stream: boolean): string {
  * flowing, a long answer is not a failure: the run's own wall-clock cap (per gear) bounds it.
  * (A whole-stream timeout here turned every long deep synthesis into a 502.)
  */
-async function post(req: LlmRequest, stream: boolean): Promise<Response> {
+async function postOnce(req: LlmRequest, stream: boolean): Promise<Response> {
   const startGuard = new AbortController();
   const timer = setTimeout(() => startGuard.abort(new Error(`no response within ${env.llmTimeoutMs}ms`)), env.llmTimeoutMs);
   const signal = req.signal ? AbortSignal.any([req.signal, startGuard.signal]) : startGuard.signal;
@@ -112,6 +112,60 @@ async function post(req: LlmRequest, stream: boolean): Promise<Response> {
   return res;
 }
 
+/**
+ * A hedged streamed call. Provider time-to-headers has a long tail (usually ~0.6 s, now and
+ * then 2 s+ for the same request), and a quick answer's TTFT is mostly that number. If the
+ * first request has not answered after LLM_HEDGE_MS, send one duplicate and keep whichever
+ * answers first; the loser is aborted before it generates anything. A failure of the first
+ * request before the hedge fires is thrown as-is: hedging is for slowness, not for errors.
+ */
+async function post(req: LlmRequest, stream: boolean, onHedge?: () => void): Promise<Response> {
+  if (!stream || env.llmHedgeMs <= 0) return postOnce(req, stream);
+  return new Promise<Response>((resolve, reject) => {
+    const ctrls: AbortController[] = [];
+    let settled = false;
+    let pending = 0;
+    let hedged = false;
+    let lastErr: unknown;
+    const launch = () => {
+      const c = new AbortController();
+      ctrls.push(c);
+      pending++;
+      const signal = req.signal ? AbortSignal.any([req.signal, c.signal]) : c.signal;
+      postOnce({ ...req, signal }, true).then(
+        (res) => {
+          pending--;
+          if (settled) {
+            void res.body?.cancel().catch(() => undefined);
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          for (const o of ctrls) if (o !== c) o.abort(new Error('hedge lost'));
+          resolve(res);
+        },
+        (err: unknown) => {
+          pending--;
+          lastErr = err;
+          if (settled) return;
+          // Wait for the other request if one is still in flight; otherwise this is the answer.
+          if (pending > 0) return;
+          if (!hedged) clearTimeout(timer);
+          settled = true;
+          reject(lastErr);
+        }
+      );
+    };
+    const timer = setTimeout(() => {
+      if (settled || req.signal?.aborted) return;
+      hedged = true;
+      onHedge?.();
+      launch();
+    }, env.llmHedgeMs);
+    launch();
+  });
+}
+
 /** One non-streamed turn. Used by the planner, where structure matters more than first paint. */
 export async function complete(req: LlmRequest): Promise<LlmTurn> {
   const res = await post(req, false);
@@ -138,6 +192,8 @@ export interface StreamHandlers {
   onToolStart?: (name: string) => void;
   /** Response headers arrived: the provider has started answering. */
   onHeaders?: () => void;
+  /** The first request was slow, so a duplicate was sent (see post()). */
+  onHedge?: () => void;
 }
 
 /**
@@ -145,7 +201,7 @@ export interface StreamHandlers {
  * what makes TTFT a property of the model rather than of this code.
  */
 export async function stream(req: LlmRequest, h: StreamHandlers = {}): Promise<LlmTurn> {
-  const res = await post(req, true);
+  const res = await post(req, true, h.onHedge);
   h.onHeaders?.();
   if (!res.body) throw new ProviderError('anthropic', 'empty stream body');
 

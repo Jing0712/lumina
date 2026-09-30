@@ -31,6 +31,9 @@ export const env = {
   llmModelDeep: process.env.LLM_MODEL_DEEP ?? 'claude-sonnet-4-5',
   anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
   llmTimeoutMs: num(process.env.LLM_TIMEOUT_MS, 60000),
+  /** Streamed LLM calls: if no response headers after this many ms, send one duplicate request
+   *  and keep whichever answers first (0 disables). Cuts the provider's tail latency. */
+  llmHedgeMs: num(process.env.LLM_HEDGE_MS, 1200),
   maxAnswerTokens: num(process.env.MAX_ANSWER_TOKENS, 900),
   maxDeepAnswerTokens: num(process.env.MAX_DEEP_ANSWER_TOKENS, 2200),
 
