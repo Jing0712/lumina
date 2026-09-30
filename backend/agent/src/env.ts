@@ -40,6 +40,9 @@ export const env = {
   searchProvider: (process.env.SEARCH_PROVIDER ?? 'tavily') as 'tavily' | 'serpapi',
   searchCacheTtlSeconds: num(process.env.SEARCH_CACHE_TTL_SECONDS, 21600),
   searchResults: num(process.env.SEARCH_RESULTS, 4),
+  /** Tavily search_depth: 'fast' trades a little ranking for latency (web_search sits on the
+   *  critical path of every uncached quick answer). 'basic' | 'fast' | 'ultra-fast' | 'advanced'. */
+  searchDepth: process.env.SEARCH_DEPTH ?? 'fast',
   searchTimeoutMs: num(process.env.SEARCH_TIMEOUT_MS, 12000),
 
   /** Pages read per search: quick reads a few, deep reads a few per sub-question. */

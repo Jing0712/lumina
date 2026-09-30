@@ -109,7 +109,7 @@ async function tavily(query: string, signal?: AbortSignal): Promise<SearchResult
       body: JSON.stringify({
         query: query.slice(0, 400),
         max_results: env.searchResults,
-        search_depth: 'basic',
+        search_depth: env.searchDepth,
         include_answer: false,
         include_raw_content: 'text'
       }),
