@@ -1,0 +1,15 @@
+# The agent service holds the provider keys and the deep-search cap, so it has NO public
+# service: no [http_service] block. The gateway reaches it over Fly's private network at
+#   http://<this app name>.internal:8000
+app = "lumina-agent-CHANGE-ME"
+primary_region = "iad"
+
+
+[env]
+  PORT_AGENT = "8000"
+  RUNS_DIR = "/app/runs"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

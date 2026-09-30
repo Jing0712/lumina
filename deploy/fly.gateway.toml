@@ -1,0 +1,21 @@
+app = "lumina-gateway-CHANGE-ME"
+primary_region = "iad"
+
+
+[env]
+  PORT_GATEWAY = "8787"
+  AGENT_URL = "http://lumina-agent-CHANGE-ME.internal:8000"
+  # Add your Vercel URL here before you deploy the UI.
+  CORS_ORIGINS = "https://CHANGE-ME.vercel.app"
+  RATE_LIMIT_PER_MINUTE = "120"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
