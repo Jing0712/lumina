@@ -42,12 +42,45 @@ async function relay(upstream: globalThis.Response, res: Response): Promise<void
   res.send(Buffer.from(await upstream.arrayBuffer()));
 }
 
+/**
+ * fetch to the agent, retried ONCE when the connection itself failed before any response
+ * (a pooled keep-alive socket the agent had already closed, or the agent mid-restart). Those
+ * failures happen before the agent handled anything, so a retry cannot run a request twice.
+ */
+const RETRYABLE = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
+function causeCode(err: unknown): string {
+  const c = (err as { cause?: { code?: string } })?.cause;
+  return c?.code ?? '';
+}
+async function fetchAgent(url: string, init: RequestInit): Promise<globalThis.Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const code = causeCode(err);
+    if (!RETRYABLE.has(code) || init.signal?.aborted || init.body instanceof Object && 'pipe' in (init.body as object)) {
+      throw withCode(err, code);
+    }
+    log.warn({ url, code }, 'agent connection failed before a response; retrying once');
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      return await fetch(url, init);
+    } catch (err2) {
+      throw withCode(err2, causeCode(err2));
+    }
+  }
+}
+function withCode(err: unknown, code: string): Error {
+  const e = err instanceof Error ? err : new Error(String(err));
+  if (code && !e.message.includes(code)) e.message = `${e.message} (${code})`;
+  return e;
+}
+
 /** Plain JSON routes. */
 export async function proxyJson(req: Request, res: Response): Promise<void> {
   const hasBody = !['GET', 'HEAD', 'DELETE'].includes(req.method);
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(`${env.agentUrl}${req.originalUrl}`, {
+    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: req.method,
       headers: upstreamHeaders(req, res, hasBody ? { 'content-type': 'application/json' } : {}),
       ...(hasBody ? { body: JSON.stringify(req.body ?? {}) } : {}),
@@ -79,7 +112,7 @@ export async function proxyUpload(req: Request, res: Response): Promise<void> {
       signal: AbortSignal.timeout(Math.max(env.upstreamTimeoutMs, 120000))
     } as RequestInit & { duplex: 'half' });
   } catch (err) {
-    return badGateway(res, err, 'agent service unreachable');
+    return badGateway(res, withCode(err, causeCode(err)), 'agent service unreachable');
   }
   await relay(upstream, res);
 }
@@ -94,7 +127,7 @@ export async function proxyAsk(req: Request, res: Response): Promise<void> {
 
   let upstream: globalThis.Response;
   try {
-    upstream = await fetch(`${env.agentUrl}${req.originalUrl}`, {
+    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: 'POST',
       headers: upstreamHeaders(req, res, { 'content-type': 'application/json', accept: 'text/event-stream' }),
       body: JSON.stringify(req.body ?? {}),

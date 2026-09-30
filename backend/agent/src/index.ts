@@ -107,7 +107,7 @@ process.on('unhandledRejection', (reason) => {
   log.error({ err: reason instanceof Error ? reason.message : String(reason) }, 'unhandled rejection');
 });
 
-app.listen(env.port, () => {
+const server = app.listen(env.port, () => {
   log.info(
     {
       port: env.port,
@@ -125,3 +125,7 @@ app.listen(env.port, () => {
   );
   if (env.embeddedWorker) startWorker();
 });
+// Keep idle upstream sockets open longer than any client pool keeps them (undici: 4s), so a
+// reused keep-alive connection is never closed under an in-flight request.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;

@@ -172,6 +172,10 @@ app.use((err: Error & { type?: string; status?: number }, _req: Request, res: Re
   res.status(502).json({ error: err.message, status: 502, requestId: String(res.locals.requestId) });
 });
 
-app.listen(env.port, () => {
+const server = app.listen(env.port, () => {
   log.info({ port: env.port, agentUrl: env.agentUrl, cors: env.corsOrigins, rateLimitPerMinute: env.rateLimitPerMinute }, 'gateway up');
 });
+// Keep idle upstream sockets open longer than any client pool keeps them (undici: 4s), so a
+// reused keep-alive connection is never closed under an in-flight request.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
