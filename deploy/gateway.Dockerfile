@@ -5,7 +5,7 @@ FROM node:20-slim AS build
 WORKDIR /app
 COPY . .
 RUN npm ci --no-audit --no-fund
-RUN npm run build -w @lumina/contract && npm run build -w @lumina/gateway
+RUN npm run build -w @lumina/contract && npm run build -w @lumina/gateway && npm run build -w @lumina/web
 
 FROM node:20-slim
 WORKDIR /app

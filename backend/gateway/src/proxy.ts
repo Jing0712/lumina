@@ -6,10 +6,15 @@
  * If the agent is unreachable or fails, the browser gets a 502 — never a 2xx.
  */
 import type { Request, Response } from 'express';
-import { MAX_UPLOAD_BYTES, REQUEST_HEADER, USER_HEADER } from '@lumina/contract';
+import {
+  CreateSpaceResponse, CreateThreadResponse, ErrorBody, GetThreadResponse,
+  ListDocumentsResponse, ListMemoryResponse, ListSpacesResponse, ListThreadsResponse,
+  MAX_UPLOAD_BYTES, REQUEST_HEADER, StatsResponse, UploadDocumentResponse, USER_HEADER
+} from '@lumina/contract';
+import type { ZodTypeAny } from 'zod';
 import { env } from './env.js';
 import { log } from './log.js';
-import { sseHeaders, sseSend } from './sse.js';
+import { SseCompletion, sseHeaders, sseSend } from './sse.js';
 import { agentFetch, type AgentFetchInit } from './agentFetch.js';
 
 function upstreamHeaders(req: Request, res: Response, extra: Record<string, string> = {}): Record<string, string> {
@@ -23,6 +28,7 @@ function upstreamHeaders(req: Request, res: Response, extra: Record<string, stri
 function badGateway(res: Response, err: unknown, what: string): void {
   const message = `${what}: ${(err as Error)?.message ?? String(err)}`;
   log.error({ requestId: res.locals.requestId, err: message }, 'upstream failure');
+  if (res.destroyed || res.writableEnded) return;
   if (res.headersSent) {
     res.end();
     return;
@@ -30,23 +36,45 @@ function badGateway(res: Response, err: unknown, what: string): void {
   res.status(502).json({ error: message, status: 502, requestId: String(res.locals.requestId) });
 }
 
-async function relay(upstream: globalThis.Response, res: Response): Promise<void> {
-  res.status(upstream.status);
-  if (upstream.status === 204) {
-    res.end();
-    return;
+const RESPONSES: Record<string, { status: number; schema?: ZodTypeAny }> = {
+  'POST /threads': { status: 201, schema: CreateThreadResponse },
+  'GET /threads': { status: 200, schema: ListThreadsResponse },
+  'GET /threads/:threadId': { status: 200, schema: GetThreadResponse },
+  'GET /memory': { status: 200, schema: ListMemoryResponse },
+  'DELETE /memory/:memoryId': { status: 204 },
+  'POST /spaces': { status: 201, schema: CreateSpaceResponse },
+  'GET /spaces': { status: 200, schema: ListSpacesResponse },
+  'POST /spaces/:spaceId/documents': { status: 202, schema: UploadDocumentResponse },
+  'GET /spaces/:spaceId/documents': { status: 200, schema: ListDocumentsResponse },
+  'GET /stats': { status: 200, schema: StatsResponse }
+};
+const ERROR_STATUSES = new Set([400, 401, 404, 413, 429, 501, 502]);
+
+async function relay(upstream: globalThis.Response, req: Request, res: Response): Promise<void> {
+  const contract = RESPONSES[`${req.method} ${req.route.path}`];
+  if (upstream.ok && (!contract || upstream.status !== contract.status)) {
+    await upstream.body?.cancel();
+    throw new Error(`agent returned unexpected status ${upstream.status}`);
   }
-  const type = upstream.headers.get('content-type');
-  if (type) res.setHeader('content-type', type);
+  if (!upstream.ok && !ERROR_STATUSES.has(upstream.status)) {
+    await upstream.body?.cancel();
+    throw new Error(`agent returned HTTP ${upstream.status}`);
+  }
   const retry = upstream.headers.get('retry-after');
   if (retry) res.setHeader('retry-after', retry);
-  res.send(Buffer.from(await upstream.arrayBuffer()));
+  if (upstream.status === 204) {
+    res.status(204).end();
+    return;
+  }
+  const body = await upstream.json();
+  const parsed = (upstream.ok ? contract?.schema : ErrorBody)?.safeParse(body);
+  if (!parsed?.success) throw new Error('agent response does not match the API contract');
+  res.status(upstream.status).json(parsed.data);
 }
 
 /**
- * fetch to the agent, retried ONCE when the connection itself failed before any response
- * (a pooled keep-alive socket the agent had already closed, or the agent mid-restart). Those
- * failures happen before the agent handled anything, so a retry cannot run a request twice.
+ * Safe reads may retry one failed connection. A reset before response headers does NOT
+ * prove the agent did no work: replaying a POST can create duplicate state or spend twice.
  */
 const RETRYABLE = new Set(['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
 function causeCode(err: unknown): string {
@@ -58,8 +86,7 @@ async function fetchAgent(url: string, init: AgentFetchInit): Promise<globalThis
     return await agentFetch(url, init);
   } catch (err) {
     const code = causeCode(err);
-    // A streamed body (the upload) cannot be replayed, so only string/empty bodies retry.
-    if (!RETRYABLE.has(code) || init.signal?.aborted || (init.body !== undefined && typeof init.body !== 'string')) {
+    if (!['GET', 'HEAD'].includes(init.method) || !RETRYABLE.has(code) || init.signal?.aborted || init.body !== undefined) {
       throw withCode(err, code);
     }
     log.warn({ url, code }, 'agent connection failed before a response; retrying once');
@@ -77,21 +104,47 @@ function withCode(err: unknown, code: string): Error {
   return e;
 }
 
+/** Cancel both headers and body on timeout or downstream disconnect, on every proxy route. */
+function lifetime(req: Request, res: Response, timeoutMs: number) {
+  const controller = new AbortController();
+  let clientGone = false;
+  const disconnect = () => {
+    if (res.writableFinished) return;
+    clientGone = true;
+    controller.abort(new Error('client disconnected'));
+  };
+  res.once('close', disconnect);
+  req.once('aborted', disconnect);
+  const timer = setTimeout(() => controller.abort(new Error('agent request timed out')), timeoutMs);
+  timer.unref();
+  return {
+    signal: controller.signal,
+    clientGone: () => clientGone,
+    dispose: () => {
+      clearTimeout(timer);
+      res.off('close', disconnect);
+      req.off('aborted', disconnect);
+    }
+  };
+}
+
 /** Plain JSON routes. */
 export async function proxyJson(req: Request, res: Response): Promise<void> {
   const hasBody = !['GET', 'HEAD', 'DELETE'].includes(req.method);
-  let upstream: globalThis.Response;
+  const request = lifetime(req, res, env.upstreamTimeoutMs);
   try {
-    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
+    const upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: req.method,
       headers: upstreamHeaders(req, res, hasBody ? { 'content-type': 'application/json' } : {}),
       ...(hasBody ? { body: JSON.stringify(req.body ?? {}) } : {}),
-      signal: AbortSignal.timeout(env.upstreamTimeoutMs)
+      signal: request.signal
     });
+    await relay(upstream, req, res);
   } catch (err) {
-    return badGateway(res, err, 'agent service unreachable');
+    if (!request.clientGone()) badGateway(res, err, 'agent request failed');
+  } finally {
+    request.dispose();
   }
-  await relay(upstream, res);
 }
 
 /** Multipart upload: stream the body straight through; the agent owns parsing it. */
@@ -101,68 +154,86 @@ export async function proxyUpload(req: Request, res: Response): Promise<void> {
     res.status(413).json({ error: `file too large (max ${MAX_UPLOAD_BYTES} bytes)`, status: 413, requestId: String(res.locals.requestId) });
     return;
   }
-  let upstream: globalThis.Response;
+  const request = lifetime(req, res, Math.max(env.upstreamTimeoutMs, 120000));
   try {
-    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
+    const upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: 'POST',
       headers: upstreamHeaders(req, res, {
         'content-type': req.header('content-type') ?? 'application/octet-stream',
         ...(length ? { 'content-length': String(length) } : {})
       }),
       body: req,
-      signal: AbortSignal.timeout(Math.max(env.upstreamTimeoutMs, 120000))
+      signal: request.signal
     });
+    await relay(upstream, req, res);
   } catch (err) {
-    return badGateway(res, withCode(err, causeCode(err)), 'agent service unreachable');
+    if (!request.clientGone()) badGateway(res, withCode(err, causeCode(err)), 'agent upload failed');
+  } finally {
+    request.dispose();
   }
-  await relay(upstream, res);
 }
 
 /** The answer stream. */
 export async function proxyAsk(req: Request, res: Response): Promise<void> {
-  const cancel = new AbortController();
-  res.on('close', () => {
-    // The browser left: stop the agent too, or it keeps spending on an answer nobody reads.
-    if (!res.writableFinished) cancel.abort();
-  });
-
-  let upstream: globalThis.Response;
+  const request = lifetime(req, res, env.upstreamAskTimeoutMs);
+  const completion = new SseCompletion();
   try {
-    upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
+    const upstream = await fetchAgent(`${env.agentUrl}${req.originalUrl}`, {
       method: 'POST',
       headers: upstreamHeaders(req, res, { 'content-type': 'application/json', accept: 'text/event-stream' }),
       body: JSON.stringify(req.body ?? {}),
-      signal: cancel.signal
+      signal: request.signal
     });
-  } catch (err) {
-    if (cancel.signal.aborted) return;
-    return badGateway(res, err, 'agent service unreachable');
-  }
+    if (!upstream.ok) {
+      await relay(upstream, req, res);
+      return;
+    }
+    const type = upstream.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    if (upstream.status !== 200 || type !== 'text/event-stream' || !upstream.body) {
+      await upstream.body?.cancel();
+      throw new Error('agent ask response must be HTTP 200 text/event-stream');
+    }
 
-  const type = upstream.headers.get('content-type') ?? '';
-  if (!upstream.ok || !type.includes('text/event-stream') || !upstream.body) {
-    // 400 / 404 / 429 (deep cap) / 502 before the stream opened: pass status and body through.
-    await relay(upstream, res);
-    return;
-  }
-
-  sseHeaders(res);
-  res.socket?.setNoDelay(true);
-  const reader = upstream.body.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-      const flush = (res as unknown as { flush?: () => void }).flush;
-      if (typeof flush === 'function') flush.call(res);
+    sseHeaders(res);
+    res.socket?.setNoDelay(true);
+    const reader = upstream.body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        completion.push(value);
+        if (request.clientGone()) return;
+        if (!res.write(Buffer.from(value))) {
+          // Slow clients exert backpressure; do not accumulate the entire answer in memory.
+          await new Promise<void>((resolve, reject) => {
+            const drained = () => { cleanup(); resolve(); };
+            const aborted = () => { cleanup(); reject(request.signal.reason); };
+            const cleanup = () => { res.off('drain', drained); request.signal.removeEventListener('abort', aborted); };
+            res.once('drain', drained);
+            request.signal.addEventListener('abort', aborted, { once: true });
+            if (request.signal.aborted) aborted();
+          });
+        }
+        const flush = (res as unknown as { flush?: () => void }).flush;
+        if (typeof flush === 'function') flush.call(res);
+      }
+      if (!completion.terminal) throw new Error('agent stream ended without done or error');
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   } catch (err) {
-    if (!cancel.signal.aborted && !res.writableEnded) {
-      // The agent died mid-answer: say so on the stream rather than just stopping.
-      log.error({ requestId: res.locals.requestId, err: (err as Error).message }, 'agent stream interrupted');
-      sseSend(res, 'error', { status: 502, error: `agent stream interrupted: ${(err as Error).message}` });
+    if (!request.clientGone() && !res.destroyed && !res.writableEnded) {
+      if (!res.headersSent) badGateway(res, err, 'agent ask failed');
+      else {
+        log.error({ requestId: res.locals.requestId, err: (err as Error).message }, 'agent stream interrupted');
+        // Terminate a partially relayed frame before writing a complete error frame.
+        if (completion.partialFrame) res.write('\n\n');
+        sseSend(res, 'error', { status: 502, error: `agent stream interrupted: ${(err as Error).message}` });
+      }
     }
+  } finally {
+    request.dispose();
+    if (!res.writableEnded && !res.destroyed) res.end();
   }
-  if (!res.writableEnded) res.end();
 }

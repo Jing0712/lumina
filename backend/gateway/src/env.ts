@@ -26,5 +26,7 @@ export const env = {
   webDist: resolve(process.cwd(), process.env.WEB_DIST ?? '../../web/dist'),
   /** The eval skill's output, served at GET /evals/report.json. */
   reportPath: resolve(process.cwd(), process.env.REPORT_PATH ?? '../../reports/report.json'),
-  upstreamTimeoutMs: num(process.env.UPSTREAM_TIMEOUT_MS, 30000)
+  upstreamTimeoutMs: num(process.env.UPSTREAM_TIMEOUT_MS, 30000),
+  /** Deep's 240-second run cap plus time for the final response; covers headers AND body. */
+  upstreamAskTimeoutMs: num(process.env.UPSTREAM_ASK_TIMEOUT_MS, 255000)
 } as const;

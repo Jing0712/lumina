@@ -1,4 +1,33 @@
 import type { Response } from 'express';
+import { DoneEvent, StreamErrorEvent } from '@lumina/contract';
+
+/** Observe completion without buffering or rewriting the bytes sent to the browser. */
+export class SseCompletion {
+  private readonly decoder = new TextDecoder();
+  private buffer = '';
+  terminal = false;
+
+  get partialFrame(): boolean {
+    return Boolean(this.buffer.trim());
+  }
+
+  push(bytes: Uint8Array): void {
+    this.buffer += this.decoder.decode(bytes, { stream: true });
+    for (;;) {
+      const split = /\r?\n\r?\n/.exec(this.buffer);
+      if (!split) break;
+      const frame = this.buffer.slice(0, split.index);
+      this.buffer = this.buffer.slice(split.index + split[0].length);
+      const lines = frame.split(/\r?\n/);
+      const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim();
+      if (event !== 'done' && event !== 'error') continue;
+      const data = lines.filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('\n');
+      (event === 'done' ? DoneEvent : StreamErrorEvent).parse(JSON.parse(data));
+      this.terminal = true;
+    }
+    if (this.buffer.length > 1024 * 1024) throw new Error('agent SSE frame exceeds 1 MiB');
+  }
+}
 
 /**
  * Express buffers Server-Sent Events by default, and so do most proxies. Get these four
