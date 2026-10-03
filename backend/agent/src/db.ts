@@ -36,12 +36,12 @@ export async function pingDb(): Promise<'ok' | 'down'> {
   }
 }
 
-export type CollectionName = keyof typeof COLLECTIONS | 'usage';
+export type CollectionName = keyof typeof COLLECTIONS | 'usage' | 'answerCache';
 
 /** Typed access to one of the contract's collections (plus `usage`, the deep-search counter). */
 export async function col<T extends Document = Document>(name: CollectionName): Promise<Collection<T>> {
   const d = await db();
-  const real = name === 'usage' ? 'usage' : COLLECTIONS[name];
+  const real = name === 'usage' || name === 'answerCache' ? name : COLLECTIONS[name];
   return d.collection<T>(real);
 }
 

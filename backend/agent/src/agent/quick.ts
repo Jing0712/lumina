@@ -16,6 +16,7 @@ import { normalizeQuery } from '../providers/search.js';
 import { Lru } from '../util/lru.js';
 import { isTimeSensitive } from '../util/text.js';
 import { AnswerWriter, formatSources } from './answer.js';
+import { answerCacheEligible, lookupAnswer, serveCached } from './answerCache.js';
 import { CapReached, type RunCtx, type Src } from './context.js';
 import { QUICK_TOOLS, quickSystem } from './prompts.js';
 import { fetchOne, recallMemory, researchDocs, researchWeb, saveMemory, type WebResearch } from './tools.js';
@@ -34,6 +35,12 @@ const followUps = new Lru<string>(500, env.searchCacheTtlSeconds * 1000);
 
 export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<AnswerWriter> {
   const { query, mode, spaceId } = ctx.init;
+
+  // ---- a near-duplicate of a recent, non-time-sensitive question: replay it, search nothing
+  if (answerCacheEligible(ctx, history.length > 0)) {
+    const hit = await lookupAnswer(ctx);
+    if (hit) return serveCached(ctx, hit);
+  }
 
   // ---- first action, in parallel: memory + retrieval, routed by mode
   const memP = recallMemory(ctx, 1);
@@ -71,6 +78,7 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
   })();
 
   const [memories, found] = await Promise.all([memP, retrieval]);
+  ctx.usedMemories = memories.length > 0;
   ctx.mark('retrievalDone');
   ctx.addSources(found.docs);
   if (found.web) ctx.addSources(found.web.sources);

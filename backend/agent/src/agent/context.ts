@@ -42,6 +42,17 @@ export interface ToolCallLog {
   order: number;
 }
 
+/** One deep-search subagent, as the run log records it: the branch under the plan node. */
+export interface SubagentLog {
+  subQuestion: number;
+  question: string;
+  ms: number;
+  toolCalls: number;
+  sources: number;
+  /** Tokens the subagent's own notes call spent (its context held only its own pages). */
+  tokens: number;
+}
+
 export interface RunInit {
   requestId: string;
   userId: string;
@@ -84,6 +95,15 @@ export class RunCtx {
   sourcesFrozen = false;
   capHit: CapReached | null = null;
   modelsUsed = new Set<string>();
+  /** Deep only: the subagent tree, and the fan-out's wall clock vs. what it would cost serially. */
+  subagents: SubagentLog[] = [];
+  fanOut: { wallMs: number; serialMs: number } | null = null;
+  /** Quick only: the answer was replayed from the semantic answer cache. */
+  answerCached = false;
+  /** The query's embedding, when the answer cache computed one (reused to store the answer). */
+  queryEmbedding: number[] | null = null;
+  /** Long-term memories shaped this answer, so it is personal and must not be cached. */
+  usedMemories = false;
 
   constructor(readonly init: RunInit) {
     const deep = init.depth === 'deep';

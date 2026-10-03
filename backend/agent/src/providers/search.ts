@@ -103,7 +103,7 @@ async function tavily(query: string, signal?: AbortSignal): Promise<SearchResult
   if (!secrets.tavily) throw new ProviderError('tavily', 'TAVILY_API_KEY is not set');
   let res: Response;
   try {
-    res = await nodeFetch('https://api.tavily.com/search', {
+    res = await nodeFetch(`${env.tavilyBaseUrl}/search`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${secrets.tavily}` },
       body: JSON.stringify({

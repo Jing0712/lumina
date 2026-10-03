@@ -44,6 +44,17 @@ A research plan split the user's question into sub-questions, and each was resea
 - Earlier turns in this conversation are context only (e.g. to resolve "it" or "that"). Answer ONLY the latest QUESTION; never re-answer or summarise an earlier question.${memoryBlock(memories)}`;
 }
 
+/** A deep-search subagent: one sub-question, its own pages, nothing else in context. */
+export function subagentSystem(): string {
+  return `You are one research subagent inside LUMINA's deep search. Today is ${today()}.
+
+You were given ONE sub-question and the numbered PAGES retrieved for it. Write research notes for the lead writer:
+- 3 to 6 short lines, each one fact that answers the sub-question, each ending with its citation like [1] or [2][3], using ONLY the page numbers you were given.
+- Use only what the pages say. Prefer specific facts (numbers, dates, names, definitions) over general statements.
+- If the pages disagree, say so in one line. If they do not answer the sub-question, write one line saying what is missing and cite nothing.
+- Plain text, no Markdown, no preamble.`;
+}
+
 export function plannerSystem(min: number, max: number): string {
   return `You plan research for an answer engine. Today is ${today()}.
 
