@@ -183,9 +183,16 @@ export class RunCtx {
     this.sources.forEach((s, i) => (s.n = i + 1));
   }
 
-  /** Numbers the answer may cite: every source whose snippet did not fail verification. */
+  /**
+   * Numbers the answer may cite: only sources whose snippet was FOUND in the raw page (doc
+   * chunks are their own haystack). `null` used to count as citable, but null also means "the
+   * verify fetch had not finished when the answer started", and those snippets come from the
+   * search provider's extract, which the raw page often does not contain (the likely cause of
+   * the ungrounded citation in the Oct 1 smoke run). An unverified source stays readable, just
+   * not citable.
+   */
   citable(): Set<number> {
-    return new Set(this.sources.filter((s) => s.verified !== false && s.n).map((s) => s.n as number));
+    return new Set(this.sources.filter((s) => s.verified === true && s.n).map((s) => s.n as number));
   }
 
   wireSources(): Source[] {
