@@ -62,7 +62,7 @@ Decompose the user's question into ${min}–${max} sub-questions that a careful 
 - be answerable by a web search on its own (self-contained: repeat names and context, no pronouns pointing at the original question);
 - cover a DIFFERENT facet (cost, mechanism, failure modes, alternatives, evidence, recent changes...), so together they retrieve different pages;
 - not be a restatement of the original question.
-Give each a reason of at most 12 words: why answering it is necessary for the final answer. Keep each sub-question under 20 words.
+Give each a reason of at most 8 words: why answering it is necessary for the final answer. Keep each sub-question under 15 words.
 Call the plan_research tool with the plan.`;
 }
 
@@ -71,8 +71,9 @@ export const PLAN_TOOL = (min: number, max: number): ToolDef => ({
   description: 'Record the research plan: sub-questions to research separately, each with a one-line reason.',
   input_schema: {
     type: 'object',
+    // No plan-level reason: every output token is on deep's first paint (~120 tok/s for tool
+    // JSON), and each sub-question already carries the reason the plan event needs.
     properties: {
-      reason: { type: 'string', description: 'One sentence: why the question needs these parts.' },
       subQuestions: {
         type: 'array',
         minItems: min,

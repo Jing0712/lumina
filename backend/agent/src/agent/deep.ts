@@ -27,7 +27,6 @@ import { recallMemory, researchDocs, researchWeb } from './tools.js';
 
 export interface Plan {
   subQuestions: SubQuestion[];
-  reason?: string;
 }
 
 export async function runDeep(ctx: RunCtx, history: llm.LlmMessage[]): Promise<{ writer: AnswerWriter; plan: Plan }> {
@@ -191,7 +190,9 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
   const t0 = Date.now();
 
   const ask = async (extra?: string) => {
-    const r = await llm.complete({
+    // Streamed, not complete(): only a streamed call is hedged against the provider's slow
+    // starts (LLM_HEDGE_MS), and the plan is deep search's first paint (deep_plan_p95_ms).
+    const r = await llm.stream({
       model: env.llmModelPlanner,
       system: plannerSystem(min, max),
       messages: [...history.slice(-2), { role: 'user', content: extra ? `${ctx.init.query}\n\n${extra}` : ctx.init.query }],
@@ -204,7 +205,6 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
     ctx.addLlmUsage(env.llmModelPlanner, r.tokensIn, r.tokensOut);
     const use = r.content.find((b) => b.type === 'tool_use');
     const input = (use && use.type === 'tool_use' ? use.input : {}) as {
-      reason?: unknown;
       subQuestions?: { question?: unknown; reason?: unknown }[];
     };
     const seen = new Set<string>();
@@ -217,7 +217,7 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
         return true;
       })
       .slice(0, max);
-    return { subs, reason: typeof input.reason === 'string' ? input.reason : undefined };
+    return { subs };
   };
 
   let out;
@@ -240,7 +240,7 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
   ctx.trace(
     'plan_research',
     { query: ctx.init.query },
-    { ok: true, ms: Date.now() - t0, order: 0, reason: `${subQuestions.length} sub-questions${out.reason ? `: ${out.reason}` : ''}` }
+    { ok: true, ms: Date.now() - t0, order: 0, reason: `${subQuestions.length} sub-questions` }
   );
-  return { subQuestions, ...(out.reason ? { reason: out.reason } : {}) };
+  return { subQuestions };
 }

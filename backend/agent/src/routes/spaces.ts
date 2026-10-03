@@ -11,6 +11,7 @@ import { ObjectId } from 'mongodb';
 import { ACCEPTED_UPLOAD_TYPES, CreateSpaceBody, MAX_UPLOAD_BYTES, newId } from '@lumina/contract';
 import { col, uploadsBucket } from '../db.js';
 import { wakeWorker } from '../jobs/worker.js';
+import { Lru } from '../util/lru.js';
 
 export const spacesRouter = asyncRouter();
 
@@ -19,6 +20,23 @@ interface SpaceRow {
   userId: string;
   name: string;
   createdAt: Date;
+}
+
+/**
+ * Spaces this process has already seen, keyed by `userId:spaceId`. A Space is never deleted or
+ * re-owned (there is no route for either), so a positive hit is always true; it saves the
+ * ownership round trip on every upload after the first (accept_202_p95_ms). Misses still read
+ * Mongo, so an unknown or foreign id is a 404 exactly as before.
+ */
+const knownSpaces = new Lru<SpaceRow>(5000, 6 * 3600_000);
+
+async function findSpace(spaceId: string, userId: string): Promise<SpaceRow | null> {
+  const key = `${userId}:${spaceId}`;
+  const hit = knownSpaces.get(key);
+  if (hit) return hit;
+  const row = await (await col<SpaceRow>('spaces')).findOne({ _id: spaceId, userId });
+  if (row) knownSpaces.set(key, row);
+  return row;
 }
 
 const iso = (d: unknown) => (d instanceof Date ? d.toISOString() : String(d));
@@ -30,12 +48,9 @@ spacesRouter.post('/spaces', async (req, res) => {
     return;
   }
   const spaceId = newId('spc');
-  await (await col<SpaceRow>('spaces')).insertOne({
-    _id: spaceId,
-    userId: res.locals.userId as string,
-    name: parsed.data.name,
-    createdAt: new Date()
-  });
+  const row: SpaceRow = { _id: spaceId, userId: res.locals.userId as string, name: parsed.data.name, createdAt: new Date() };
+  await (await col<SpaceRow>('spaces')).insertOne(row);
+  knownSpaces.set(`${row.userId}:${spaceId}`, row);
   res.status(201).json({ spaceId, name: parsed.data.name });
 });
 
@@ -69,7 +84,7 @@ function mimeOf(name: string, declared: string): string | null {
 spacesRouter.post('/spaces/:spaceId/documents', async (req, res, next) => {
   // Check the Space before accepting a body, so a wrong id is a fast 404.
   const userId = res.locals.userId as string;
-  const space = await (await col<SpaceRow>('spaces')).findOne({ _id: req.params.spaceId, userId });
+  const space = await findSpace(String(req.params.spaceId), userId);
   if (!space) {
     res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404, requestId: res.locals.requestId });
     return;
@@ -133,7 +148,7 @@ spacesRouter.post('/spaces/:spaceId/documents', async (req, res, next) => {
 
 spacesRouter.get('/spaces/:spaceId/documents', async (req, res) => {
   const userId = res.locals.userId as string;
-  const space = await (await col<SpaceRow>('spaces')).findOne({ _id: req.params.spaceId, userId });
+  const space = await findSpace(String(req.params.spaceId), userId);
   if (!space) {
     res.status(404).json({ error: `no space ${req.params.spaceId}`, status: 404, requestId: res.locals.requestId });
     return;
