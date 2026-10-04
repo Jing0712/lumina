@@ -45,7 +45,7 @@ export async function persistRun(
   if (!abandoned) {
     try {
       mkdirSync(env.runsDir, { recursive: true });
-      writeFileSync(join(env.runsDir, `${safe(requestId)}.json`), JSON.stringify({ ...runLog, marks: ctx.marks }, null, 2));
+      writeFileSync(join(env.runsDir, `${safe(requestId)}.json`), JSON.stringify({ ...runLog, ...extras(ctx), marks: ctx.marks }, null, 2));
     } catch (err) {
       log.error({ requestId, err: (err as Error).message }, 'could not write run log file');
     }
@@ -60,7 +60,7 @@ export async function persistRun(
         ? Promise.resolve()
         : runs.updateOne(
             { requestId },
-            { $set: { ...runLog, requestId, userId, threadId, answerId, query, createdAt: now } },
+            { $set: { ...runLog, ...extras(ctx), requestId, userId, threadId, answerId, query, createdAt: now } },
             { upsert: true }
           ),
       requests.insertOne({
@@ -101,11 +101,20 @@ export async function persistRun(
       ttftMs: done?.ttftMs ?? null,
       latencyMs: done?.latencyMs ?? ctx.elapsedMs(),
       sources: ctx.sources.length,
+      ...extras(ctx),
       marks: ctx.marks,
       ...(errorMessage ? { error: errorMessage } : {})
     },
     'answer'
   );
+}
+
+/** Beyond the contract's RunLog: the deep subagent tree, and whether the answer cache served it. */
+function extras(ctx: RunCtx): Record<string, unknown> {
+  return {
+    ...(ctx.subagents.length ? { subagents: ctx.subagents, fanOut: ctx.fanOut } : {}),
+    ...(ctx.answerCached ? { answerCached: true } : {})
+  };
 }
 
 const safe = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);

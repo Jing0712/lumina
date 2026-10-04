@@ -12,15 +12,35 @@
  */
 import { env } from '../env.js';
 import * as llm from '../providers/llm.js';
+import { normalizeQuery } from '../providers/search.js';
+import { Lru } from '../util/lru.js';
+import { isTimeSensitive } from '../util/text.js';
 import { AnswerWriter, formatSources } from './answer.js';
+import { answerCacheEligible, lookupAnswer, serveCached } from './answerCache.js';
 import { CapReached, type RunCtx, type Src } from './context.js';
 import { QUICK_TOOLS, quickSystem } from './prompts.js';
 import { fetchOne, recallMemory, researchDocs, researchWeb, saveMemory, type WebResearch } from './tools.js';
 
 const MAX_TURNS = 5;
 
+/**
+ * The follow-up query the model chose for a question, keyed by the normalized question and kept
+ * as long as the search cache. Same question, same sources, but at temperature 0.2 the model
+ * rewords its follow-up ("RRF formula" vs "reciprocal rank fusion formula"), each wording is a
+ * different cache key, and one missed search makes the whole repeat count as uncached. Reusing
+ * the first rewrite makes a repeat question issue the searches it issued before. Time-sensitive
+ * questions bypass the search cache anyway, so they are never memoized.
+ */
+const followUps = new Lru<string>(500, env.searchCacheTtlSeconds * 1000);
+
 export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<AnswerWriter> {
   const { query, mode, spaceId } = ctx.init;
+
+  // ---- a near-duplicate of a recent, non-time-sensitive question: replay it, search nothing
+  if (answerCacheEligible(ctx, history.length > 0)) {
+    const hit = await lookupAnswer(ctx);
+    if (hit) return serveCached(ctx, hit);
+  }
 
   // ---- first action, in parallel: memory + retrieval, routed by mode
   const memP = recallMemory(ctx, 1);
@@ -58,6 +78,7 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
   })();
 
   const [memories, found] = await Promise.all([memP, retrieval]);
+  ctx.usedMemories = memories.length > 0;
   ctx.mark('retrievalDone');
   ctx.addSources(found.docs);
   if (found.web) ctx.addSources(found.web.sources);
@@ -126,10 +147,17 @@ async function executeTool(ctx: RunCtx, name: string, input: Record<string, unkn
         ctx.capHit ??= new CapReached('tool-calls');
         return capped;
       }
-      const q = str(input.query) || ctx.init.query;
+      const asked = str(input.query) || ctx.init.query;
+      const question = normalizeQuery(ctx.init.query);
+      const memo = isTimeSensitive(ctx.init.query) ? undefined : followUps.get(question);
+      const q = memo ?? asked;
+      if (!memo && !isTimeSensitive(ctx.init.query)) followUps.set(question, asked);
       const w = await researchWeb(ctx, q, {
         pages: Math.min(2, ctx.remainingToolCalls() - 1),
-        reason: 'the model asked for another search',
+        reason:
+          memo && normalizeQuery(memo) !== normalizeQuery(asked)
+            ? `the model asked for another search ("${asked}"); reusing the follow-up query from an earlier identical question`
+            : 'the model asked for another search',
         pipeline: false
       });
       const added = ctx.addSources(w.sources);

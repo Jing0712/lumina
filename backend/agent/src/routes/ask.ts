@@ -18,6 +18,7 @@ import { historyMessages, type AnswerWriter } from '../agent/answer.js';
 import { runQuick } from '../agent/quick.js';
 import { runDeep, type Plan } from '../agent/deep.js';
 import { persistRun } from '../agent/persist.js';
+import { storeAnswer } from '../agent/answerCache.js';
 import { claimDeepSearch } from '../agent/usage.js';
 
 export const askRouter = asyncRouter();
@@ -156,7 +157,8 @@ askRouter.post('/threads/:threadId/ask', async (req: Request, res: Response) => 
       depth: body.depth,
       subQuestions: plan?.subQuestions.length ?? 0
     };
-    stream.send('done', done);
+    // answerCached is beyond the contract's DoneEvent (zod passes unknown keys through).
+    stream.send('done', { ...done, answerCached: ctx.answerCached });
     stream.end();
     await messages.insertOne({
       _id: messageId(),
@@ -174,6 +176,7 @@ askRouter.post('/threads/:threadId/ask', async (req: Request, res: Response) => 
     stream.end();
   }
 
+  if (body.depth === 'quick') await storeAnswer(ctx, terminated, history.length > 0, writer?.wire ?? []);
   await persistRun(ctx, terminated, done, terminated === 'error' ? (clientGone.signal.aborted ? 499 : 502) : 200, errorMessage);
 });
 

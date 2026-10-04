@@ -166,7 +166,7 @@ async function post(req: LlmRequest, stream: boolean, onHedge?: () => void): Pro
   });
 }
 
-/** One non-streamed turn. Used by the planner, where structure matters more than first paint. */
+/** One non-streamed turn (subagent notes: nobody is waiting on their first token). */
 export async function complete(req: LlmRequest): Promise<LlmTurn> {
   const res = await post(req, false);
   const json = (await res.json()) as {

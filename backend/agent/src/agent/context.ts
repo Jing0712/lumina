@@ -42,6 +42,17 @@ export interface ToolCallLog {
   order: number;
 }
 
+/** One deep-search subagent, as the run log records it: the branch under the plan node. */
+export interface SubagentLog {
+  subQuestion: number;
+  question: string;
+  ms: number;
+  toolCalls: number;
+  sources: number;
+  /** Tokens the subagent's own notes call spent (its context held only its own pages). */
+  tokens: number;
+}
+
 export interface RunInit {
   requestId: string;
   userId: string;
@@ -84,6 +95,15 @@ export class RunCtx {
   sourcesFrozen = false;
   capHit: CapReached | null = null;
   modelsUsed = new Set<string>();
+  /** Deep only: the subagent tree, and the fan-out's wall clock vs. what it would cost serially. */
+  subagents: SubagentLog[] = [];
+  fanOut: { wallMs: number; serialMs: number } | null = null;
+  /** Quick only: the answer was replayed from the semantic answer cache. */
+  answerCached = false;
+  /** The query's embedding, when the answer cache computed one (reused to store the answer). */
+  queryEmbedding: number[] | null = null;
+  /** Long-term memories shaped this answer, so it is personal and must not be cached. */
+  usedMemories = false;
 
   constructor(readonly init: RunInit) {
     const deep = init.depth === 'deep';
@@ -183,9 +203,16 @@ export class RunCtx {
     this.sources.forEach((s, i) => (s.n = i + 1));
   }
 
-  /** Numbers the answer may cite: every source whose snippet did not fail verification. */
+  /**
+   * Numbers the answer may cite: only sources whose snippet was FOUND in the raw page (doc
+   * chunks are their own haystack). `null` used to count as citable, but null also means "the
+   * verify fetch had not finished when the answer started", and those snippets come from the
+   * search provider's extract, which the raw page often does not contain (the likely cause of
+   * the ungrounded citation in the Oct 1 smoke run). An unverified source stays readable, just
+   * not citable.
+   */
   citable(): Set<number> {
-    return new Set(this.sources.filter((s) => s.verified !== false && s.n).map((s) => s.n as number));
+    return new Set(this.sources.filter((s) => s.verified === true && s.n).map((s) => s.n as number));
   }
 
   wireSources(): Source[] {

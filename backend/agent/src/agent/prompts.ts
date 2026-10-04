@@ -44,6 +44,17 @@ A research plan split the user's question into sub-questions, and each was resea
 - Earlier turns in this conversation are context only (e.g. to resolve "it" or "that"). Answer ONLY the latest QUESTION; never re-answer or summarise an earlier question.${memoryBlock(memories)}`;
 }
 
+/** A deep-search subagent: one sub-question, its own pages, nothing else in context. */
+export function subagentSystem(): string {
+  return `You are one research subagent inside LUMINA's deep search. Today is ${today()}.
+
+You were given ONE sub-question and the numbered PAGES retrieved for it. Write research notes for the lead writer:
+- 3 to 6 short lines, each one fact that answers the sub-question, each ending with its citation like [1] or [2][3], using ONLY the page numbers you were given.
+- Use only what the pages say. Prefer specific facts (numbers, dates, names, definitions) over general statements.
+- If the pages disagree, say so in one line. If they do not answer the sub-question, write one line saying what is missing and cite nothing.
+- Plain text, no Markdown, no preamble.`;
+}
+
 export function plannerSystem(min: number, max: number): string {
   return `You plan research for an answer engine. Today is ${today()}.
 
@@ -51,7 +62,7 @@ Decompose the user's question into ${min}–${max} sub-questions that a careful 
 - be answerable by a web search on its own (self-contained: repeat names and context, no pronouns pointing at the original question);
 - cover a DIFFERENT facet (cost, mechanism, failure modes, alternatives, evidence, recent changes...), so together they retrieve different pages;
 - not be a restatement of the original question.
-Give each a reason of at most 12 words: why answering it is necessary for the final answer. Keep each sub-question under 20 words.
+Give each a reason of at most 8 words: why answering it is necessary for the final answer. Keep each sub-question under 15 words.
 Call the plan_research tool with the plan.`;
 }
 
@@ -60,8 +71,9 @@ export const PLAN_TOOL = (min: number, max: number): ToolDef => ({
   description: 'Record the research plan: sub-questions to research separately, each with a one-line reason.',
   input_schema: {
     type: 'object',
+    // No plan-level reason: every output token is on deep's first paint (~120 tok/s for tool
+    // JSON), and each sub-question already carries the reason the plan event needs.
     properties: {
-      reason: { type: 'string', description: 'One sentence: why the question needs these parts.' },
       subQuestions: {
         type: 'array',
         minItems: min,

@@ -29,6 +29,9 @@ export const env = {
   llmModelPlanner: process.env.LLM_MODEL_PLANNER ?? llmModel,
   /** Deep synthesis: the one place a stronger (slower, pricier) model earns its cost. */
   llmModelDeep: process.env.LLM_MODEL_DEEP ?? 'claude-sonnet-4-5',
+  /** Deep-search subagents take notes on one sub-question each, in parallel: fast and cheap. */
+  llmModelSubagent: process.env.LLM_MODEL_SUBAGENT ?? llmModel,
+  maxSubagentTokens: num(process.env.MAX_SUBAGENT_TOKENS, 400),
   anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
   llmTimeoutMs: num(process.env.LLM_TIMEOUT_MS, 60000),
   /** Streamed LLM calls: if no response headers after this many ms, send one duplicate request
@@ -37,6 +40,12 @@ export const env = {
   maxAnswerTokens: num(process.env.MAX_ANSWER_TOKENS, 900),
   maxDeepAnswerTokens: num(process.env.MAX_DEEP_ANSWER_TOKENS, 2200),
 
+  /** Semantic answer cache (quick, web only). See agent/answerCache.ts for the freshness guard. */
+  answerCacheEnabled: (process.env.ANSWER_CACHE ?? 'on') !== 'off',
+  answerCacheMinSimilarity: num(process.env.ANSWER_CACHE_MIN_SIMILARITY, 0.93),
+  answerCacheTtlSeconds: num(process.env.ANSWER_CACHE_TTL_SECONDS, num(process.env.SEARCH_CACHE_TTL_SECONDS, 21600)),
+
+  tavilyBaseUrl: process.env.TAVILY_BASE_URL ?? 'https://api.tavily.com',
   searchProvider: (process.env.SEARCH_PROVIDER ?? 'tavily') as 'tavily' | 'serpapi',
   searchCacheTtlSeconds: num(process.env.SEARCH_CACHE_TTL_SECONDS, 21600),
   searchResults: num(process.env.SEARCH_RESULTS, 4),
@@ -81,7 +90,8 @@ export const env = {
   /** How many the planner is asked for. Fewer, sharper sub-questions plan faster (deep_plan_p95_ms). */
   deepSubQuestionsTarget: num(process.env.DEEP_SUB_QUESTIONS_TARGET, 4),
   deepDailyCap: num(process.env.DEEP_DAILY_CAP, 5),
-  deepConcurrency: num(process.env.DEEP_CONCURRENCY, 4),
+  /** Subagents run at once. Matches DEEP_SUB_QUESTIONS_MAX so no branch waits for a lane. */
+  deepConcurrency: num(process.env.DEEP_CONCURRENCY, 6),
 
   // The hard caps from AGENTS.md. Raising these to make a gate pass is the failure mode
   // the caps exist to catch. Two gears, two envelopes.

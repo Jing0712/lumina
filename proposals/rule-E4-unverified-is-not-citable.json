@@ -1,0 +1,14 @@
+{
+  "$comment": "Proposed addition to the cohort quality/rules.json (stretch bonus: new rule with precedent). Not wired into quality/check.mjs, which this repo may not edit. Same shape as the existing rules. The 'confirmed by' precedent line is filled in only after a live bench run shows grounding >= 0.95 with the fix (commit 312a139).",
+  "id": "E4",
+  "title": "Unverified is not citable",
+  "type": "evidence",
+  "severity": "error",
+  "rule": "A source may carry a citation number only after its quoted snippet has been found in the same raw page text the grader fetches; a verification that failed, timed out, or has not finished yet all mean not citable.",
+  "precedent": [
+    "2026-10-01, LUMINA (team Jing0712/lumina), smoke bench: citation grounding 0.929 (13 grounded of 14 verifiable, 2 unverifiable), failing the 0.95 gate and blocking submission. Code review traced it to citable() admitting verified === null, which meant both 'publisher blocked us' and 'the verify fetch was still in flight when the answer started streaming'. In the second case the snippet came from the search provider's extract, which the raw page the bench fetches did not contain. Cost: a failed grounding gate, a code fix, and a full re-run of the bench before the deploy could be evaluated.",
+    "Confirmed by: TODO, the first bench run after the fix (record its grounding number here)."
+  ],
+  "selfCheck": "If your snippet-verification fetch times out, can that source still be cited in the answer? If yes, a quote nobody checked can reach the user.",
+  "params": {}
+}

@@ -36,21 +36,30 @@ export async function pingDb(): Promise<'ok' | 'down'> {
   }
 }
 
-export type CollectionName = keyof typeof COLLECTIONS | 'usage';
+export type CollectionName = keyof typeof COLLECTIONS | 'usage' | 'answerCache';
 
 /** Typed access to one of the contract's collections (plus `usage`, the deep-search counter). */
 export async function col<T extends Document = Document>(name: CollectionName): Promise<Collection<T>> {
   const d = await db();
-  const real = name === 'usage' ? 'usage' : COLLECTIONS[name];
+  const real = name === 'usage' || name === 'answerCache' ? name : COLLECTIONS[name];
   return d.collection<T>(real);
 }
 
+let bucket: GridFSBucket | null = null;
+
+/**
+ * One bucket per process. A GridFSBucket checks (and creates) its indexes on its first write,
+ * which costs two or three Atlas round trips; a fresh bucket per upload paid that on every
+ * 202 (accept_202_p95_ms).
+ */
 export async function uploadsBucket(): Promise<GridFSBucket> {
-  return new GridFSBucket(await db(), { bucketName: GRIDFS_BUCKETS.uploads });
+  if (!bucket) bucket = new GridFSBucket(await db(), { bucketName: GRIDFS_BUCKETS.uploads });
+  return bucket;
 }
 
 export async function closeDb(): Promise<void> {
   if (client) await client.close();
   client = null;
   connecting = null;
+  bucket = null;
 }
