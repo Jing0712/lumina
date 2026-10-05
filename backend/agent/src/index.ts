@@ -18,6 +18,7 @@ import { memoryRouter } from './routes/memory.js';
 import { spacesRouter } from './routes/spaces.js';
 import { statsRouter } from './routes/stats.js';
 import { startWorker } from './jobs/worker.js';
+import { startKeepWarm } from './util/keepWarm.js';
 import { startNetTrace } from './util/netTrace.js';
 
 const app = express();
@@ -124,6 +125,7 @@ const server = app.listen(env.port, () => {
     'agent up'
   );
   if (env.embeddedWorker) startWorker();
+  if (process.env.KEEP_WARM !== 'off') startKeepWarm();
 });
 // Keep idle upstream sockets open longer than any client pool keeps them (undici: 4s), so a
 // reused keep-alive connection is never closed under an in-flight request.
