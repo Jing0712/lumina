@@ -22,6 +22,7 @@ import { cosine, embed } from '../providers/embed.js';
 import { normalizeQuery } from '../providers/search.js';
 import { isTimeSensitive } from '../util/text.js';
 import { AnswerWriter } from './answer.js';
+import { hasMemories } from './tools.js';
 import type { RunCtx, Src } from './context.js';
 import type { Source, Terminated } from '@lumina/contract';
 
@@ -155,6 +156,8 @@ export async function storeAnswer(ctx: RunCtx, terminated: Terminated, hasHistor
   if (!answerCacheEligible(ctx, hasHistory)) return;
   if (!wire.length || !/\[\d+\]/.test(ctx.answerText)) return;
   try {
+    // usedMemories alone is not enough: a memory saved seconds ago can be missing from recall.
+    if (await hasMemories(ctx.init.userId)) return;
     let embedding = ctx.queryEmbedding;
     if (!embedding) {
       const e = await embed([ctx.init.query]);

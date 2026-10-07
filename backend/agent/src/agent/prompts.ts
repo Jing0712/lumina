@@ -2,11 +2,17 @@ import type { ToolDef } from '../providers/llm.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * Saved memories are standing instructions, not background. Phrased as "follow them unless the
+ * question overrides them", they lost to "use only what the sources say": a vegetarian asking for
+ * a quick dinner got the chicken recipes the search returned. They now filter what is recommended.
+ */
 function memoryBlock(memories: string[]): string {
   if (!memories.length) return '';
   return (
-    '\n\nWhat you know about this user from long-term memory (they asked you to keep these; follow them unless the question overrides them):\n' +
-    memories.map((m) => `- ${m}`).join('\n')
+    '\n\nStanding instructions from this user, saved to long-term memory at their request. They apply to every answer, this one included, unless the QUESTION explicitly overrides them:\n' +
+    memories.map((m) => `- ${m}`).join('\n') +
+    '\nThey filter what you recommend: never suggest, recommend or list anything they rule out (for example a meat or fish dish for a vegetarian), even when the sources feature it. Leave those items out and answer from what is left; if nothing left answers the question, say so plainly rather than ignoring the instruction.'
   );
 }
 
@@ -25,6 +31,15 @@ Tools:
 - If the sources are clearly insufficient, you may call web_search${hasSpace ? ' or search_documents' : ''} ONCE with a better query, or fetch_page on a promising URL, before you write anything.
 - Call save_memory ONLY when the user states a durable preference or fact about themselves, or explicitly asks you to remember something. Never save trivia from an answer.
 - If you call a tool, call it before writing any answer text. Once you start writing, finish the answer.${memoryBlock(memories)}`;
+}
+
+/** Writes the first web search for a user with long-term memories (see quick.ts searchQueryFor). */
+export function searchQuerySystem(): string {
+  return `You write the web search query for an answer engine. The user has standing instructions saved in long-term memory.
+
+Rewrite their QUESTION as ONE web search query that finds results already respecting those instructions, but only where an instruction changes what should be found: a diet or allergy, a budget, a place, a tool or platform they use. Instructions about how to write the answer (tone, length, spelling, language) never go in the query. If no instruction changes what to look for, return the QUESTION unchanged.
+
+Reply with the query only, on one line, with no quotes and no explanation.`;
 }
 
 export function deepSynthesisSystem(memories: string[]): string {

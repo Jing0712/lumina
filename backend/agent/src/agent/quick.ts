@@ -18,8 +18,8 @@ import { isTimeSensitive } from '../util/text.js';
 import { AnswerWriter, formatSources } from './answer.js';
 import { answerCacheEligible, lookupAnswer, serveCached } from './answerCache.js';
 import { CapReached, type RunCtx, type Src } from './context.js';
-import { QUICK_TOOLS, quickSystem } from './prompts.js';
-import { fetchOne, recallMemory, researchDocs, researchWeb, saveMemory, type WebResearch } from './tools.js';
+import { QUICK_TOOLS, quickSystem, searchQuerySystem } from './prompts.js';
+import { fetchOne, hasMemories, recallMemory, researchDocs, researchWeb, saveMemory, type WebResearch } from './tools.js';
 
 const MAX_TURNS = 5;
 
@@ -36,14 +36,23 @@ const followUps = new Lru<string>(500, env.searchCacheTtlSeconds * 1000);
 export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<AnswerWriter> {
   const { query, mode, spaceId } = ctx.init;
 
-  // ---- a near-duplicate of a recent, non-time-sensitive question: replay it, search nothing
-  if (answerCacheEligible(ctx, history.length > 0)) {
+  // Long-term memories are standing instructions for every answer, which changes two things.
+  const memoryUser = await hasMemories(ctx.init.userId);
+
+  // ---- a near-duplicate of a recent, non-time-sensitive question: replay it, search nothing.
+  // Not for a user with memories: a cached answer may predate them.
+  if (!memoryUser && answerCacheEligible(ctx, history.length > 0)) {
     const hit = await lookupAnswer(ctx);
     if (hit) return serveCached(ctx, hit);
   }
 
-  // ---- first action, in parallel: memory + retrieval, routed by mode
+  // ---- first action: memory + retrieval, routed by mode. In parallel for a user with no
+  // memories. A user with memories has them recalled first, because they can change what the
+  // web should be searched for: searching the bare question returned only chicken recipes for a
+  // vegetarian, and no prompt made the model reliably leave them out.
   const memP = recallMemory(ctx, 1);
+  const webQuery = memoryUser ? memP.then((m) => searchQueryFor(ctx, m)) : Promise.resolve(query);
+  const webReason = async (plain: string) => ((await webQuery) === query ? plain : `${plain}, with the user's standing instructions folded into the query`);
   const retrieval = (async (): Promise<{ docs: Src[]; web: WebResearch | null }> => {
     if (mode === 'docs') {
       if (!spaceId) return { docs: [], web: null };
@@ -60,17 +69,17 @@ export async function runQuick(ctx: RunCtx, history: llm.LlmMessage[]): Promise<
             : `documents look weak (best ${best.toFixed(2)} < ${env.autoDocMinScore}): also searching the web`
       });
       if (d.sources.length && d.bestScore >= env.autoDocMinScore) return { docs: d.sources, web: null };
-      const w = await researchWeb(ctx, query, {
+      const w = await researchWeb(ctx, await webQuery, {
         pages: env.quickPagesPerSearch,
-        reason: 'mode=auto: blending the web in because the Space did not clearly answer',
+        reason: await webReason('mode=auto: blending the web in because the Space did not clearly answer'),
         pipeline: true,
         order: 3000
       });
       return { docs: d.sources, web: w };
     }
-    const w = await researchWeb(ctx, query, {
+    const w = await researchWeb(ctx, await webQuery, {
       pages: env.quickPagesPerSearch,
-      reason: mode === 'web' ? 'mode=web: searching for the question as asked' : 'mode=auto: no Space attached, searching the web',
+      reason: await webReason(mode === 'web' ? 'mode=web: searching for the question as asked' : 'mode=auto: no Space attached, searching the web'),
       pipeline: true,
       order: 2000
     });
@@ -182,4 +191,31 @@ async function executeTool(ctx: RunCtx, name: string, input: Record<string, unkn
       // Includes plan_research: it is not offered on a quick run, and is refused if asked for.
       return `The tool "${name}" is not available here.`;
   }
+}
+
+/**
+ * The first web search for a user with memories: their question, with any standing instruction
+ * that changes what should be FOUND folded in ("vegetarian" for a dinner question; nothing for
+ * "capital of Portugal"). One short call to the quick model; a provider failure fails the run
+ * like any other, never a silent fall back to the bare question.
+ */
+async function searchQueryFor(ctx: RunCtx, memories: string[]): Promise<string> {
+  const { query } = ctx.init;
+  if (!memories.length) return query;
+  const r = await llm.stream({
+    model: env.llmModel,
+    system: searchQuerySystem(),
+    messages: [{ role: 'user', content: `STANDING INSTRUCTIONS:\n${memories.map((m) => `- ${m}`).join('\n')}\n\nQUESTION: ${query}` }],
+    maxTokens: 60,
+    temperature: 0,
+    signal: ctx.signal
+  });
+  ctx.addLlmUsage(env.llmModel, r.tokensIn, r.tokensOut);
+  const line = r.content
+    .map((b) => (b.type === 'text' ? b.text : ''))
+    .join('')
+    .trim()
+    .split('\n')[0]
+    ?.replace(/^["'\s]+|["'\s]+$/g, '');
+  return line && line.length <= 300 ? line : query;
 }

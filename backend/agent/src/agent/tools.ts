@@ -250,29 +250,44 @@ export async function recallMemory(ctx: RunCtx, order?: number): Promise<string[
     throw err;
   }
 
-  let rows: { text: string; score: number }[];
+  let rows: { _id: string; text: string; score: number }[];
+  let unindexed = 0;
   if (env.vectorBackend === 'atlas-vector-search') {
-    rows = await memories
-      .aggregate<{ text: string; score: number }>([
-        {
-          $vectorSearch: {
-            index: 'memories_vector',
-            path: 'embedding',
-            queryVector: vector,
-            numCandidates: 100,
-            limit: env.memoryTopK,
-            filter: { userId: ctx.init.userId }
-          }
-        },
-        { $project: { _id: 0, text: 1, score: { $meta: 'vectorSearchScore' } } }
-      ])
-      .toArray();
+    // Atlas Search indexes lag their writes by seconds, so a memory saved moments ago (often the
+    // turn before) is not in the vector index yet; the newest rows are read directly, alongside,
+    // and scored by the same cosine. Without this, recall reported "no stored memory is relevant"
+    // right after a save, and that answer was cached as if the user had no preferences.
+    const [hits, newest] = await Promise.all([
+      memories
+        .aggregate<{ _id: string; text: string; score: number }>([
+          {
+            $vectorSearch: {
+              index: 'memories_vector',
+              path: 'embedding',
+              queryVector: vector,
+              numCandidates: 100,
+              limit: env.memoryTopK,
+              filter: { userId: ctx.init.userId }
+            }
+          },
+          { $project: { _id: 1, text: 1, score: { $meta: 'vectorSearchScore' } } }
+        ])
+        .toArray(),
+      memories.find({ userId: ctx.init.userId }).sort({ createdAt: -1 }).limit(env.memoryTopK).toArray()
+    ]);
     // Atlas reports cosine as (1 + cos) / 2; convert back so the floor means cosine.
-    rows = rows.map((r) => ({ ...r, score: r.score * 2 - 1 })).filter((r) => r.score >= env.memoryMinScore);
+    rows = hits.map((r) => ({ ...r, score: r.score * 2 - 1 }));
+    const seen = new Set(rows.map((r) => r._id));
+    const late = newest.filter((m) => !seen.has(m._id)).map((m) => ({ _id: m._id, text: m.text, score: cosine(vector, m.embedding) }));
+    rows = [...rows, ...late]
+      .filter((r) => r.score >= env.memoryMinScore)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, env.memoryTopK);
+    unindexed = rows.filter((r) => !seen.has(r._id)).length;
   } else {
     const all = await memories.find({ userId: ctx.init.userId }).limit(500).toArray();
     rows = all
-      .map((m) => ({ text: m.text, score: cosine(vector, m.embedding) }))
+      .map((m) => ({ _id: m._id, text: m.text, score: cosine(vector, m.embedding) }))
       .filter((r) => r.score >= env.memoryMinScore)
       .sort((a, b) => b.score - a.score)
       .slice(0, env.memoryTopK);
@@ -293,10 +308,18 @@ export async function recallMemory(ctx: RunCtx, order?: number): Promise<string[
       ok: true,
       ms: Date.now() - t0,
       order,
-      reason: texts.length ? `recalled ${texts.length} memory item(s): ${texts.map((t) => `"${clip(t, 80)}"`).join('; ')}` : 'no stored memory is relevant to this question'
+      reason: texts.length
+        ? `recalled ${texts.length} memory item(s): ${texts.map((t) => `"${clip(t, 80)}"`).join('; ')}` +
+          (unindexed ? ` (${unindexed} read directly: saved after the vector index last caught up)` : '')
+        : 'no stored memory is relevant to this question'
     }
   );
   return texts;
+}
+
+/** Whether this user has any long-term memories at all (one indexed lookup). */
+export async function hasMemories(userId: string): Promise<boolean> {
+  return (await (await col<MemoryRow>('memories')).findOne({ userId }, { projection: { _id: 1 } })) !== null;
 }
 
 export async function saveMemory(ctx: RunCtx, text: string): Promise<{ ok: boolean; id?: string; message: string }> {
