@@ -230,8 +230,10 @@ async function planResearch(ctx: RunCtx, history: llm.LlmMessage[]): Promise<Pla
     ctx.trace('plan_research', { query: ctx.init.query }, { ok: false, ms: Date.now() - t0, error: (err as Error).message, order: 0 });
     throw err;
   }
-  if (out.subs.length < 2) {
-    const msg = `planner returned ${out.subs.length} sub-question(s)`;
+  // Below the minimum even after the retry: fail loudly. A two-question plan is a quick search
+  // with extra steps (SPEC: DEEP_SUB_QUESTIONS_MIN–MAX, sla min_deep_sub_questions), not a deep one.
+  if (out.subs.length < min) {
+    const msg = `planner returned ${out.subs.length} sub-question(s); a deep plan needs at least ${min}`;
     ctx.trace('plan_research', { query: ctx.init.query }, { ok: false, ms: Date.now() - t0, error: msg, order: 0 });
     throw new llm.ProviderError('anthropic', msg);
   }
