@@ -101,3 +101,4 @@ Full flow, the deploy table, and the 60–90 second video checklist:
 time: tokens arriving all at once, a document that indexes but cannot be found, retrieval
 that leaks across Spaces, uploads that stall the answer stream, and a "deep" search that is
 only slower.
+
