@@ -11,7 +11,8 @@
     "packages/contract",
     "backend/gateway",
     "backend/agent",
-    "web"
+    "web",
+    "web-next"
   ],
   "scripts": {
     "dev": "npm run build -w @lumina/contract && concurrently -k -n agent,gateway,web -c magenta,cyan,green \"npm:dev:agent\" \"npm:dev:gateway\" \"npm:dev:web\"",
@@ -20,13 +21,14 @@
     "dev:web": "npm run dev -w @lumina/web",
     "worker": "npm run worker -w @lumina/agent",
     "build": "npm run build -w @lumina/contract && npm run build -w @lumina/agent && npm run build -w @lumina/gateway && npm run build -w @lumina/web",
-    "typecheck": "tsc -p packages/contract/tsconfig.json --noEmit && tsc -p backend/gateway/tsconfig.json --noEmit && tsc -p backend/agent/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "typecheck": "tsc -p packages/contract/tsconfig.json --noEmit && tsc -p backend/gateway/tsconfig.json --noEmit && tsc -p backend/agent/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p web-next/tsconfig.json --noEmit",
     "lint": "eslint .",
     "indexes": "node scripts/create-indexes.mjs",
     "export:runs": "node scripts/export-runs.mjs",
     "bench": "node benchmark/bench.mjs",
     "quality": "node quality/check.mjs .",
-    "eval": "node eval/eval.mjs"
+    "eval": "node eval/eval.mjs",
+    "dev:web-next": "npm run dev -w @lumina/web-next"
   },
   "devDependencies": {
     "@eslint/js": "^9.12.0",

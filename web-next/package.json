@@ -1,0 +1,24 @@
+{
+  "name": "@lumina/web-next",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LUMINA web UI, rebuilt in Next.js. Talks only to the gateway, against the same @lumina/contract as the provided web/.",
+  "scripts": {
+    "dev": "next dev -p 5174",
+    "build": "next build",
+    "start": "next start -p 5174",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lumina/contract": "*",
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.6.2"
+  }
+}
